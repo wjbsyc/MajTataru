@@ -326,7 +326,25 @@ namespace MajTataru
 
             if (actionType == 0x0140)
             {
-                // kakan declaration: tiles handled in draw event
+                uint kakanTileId = p.Length > 4 ? (p[4] & 0xFFFF) : 0xFFFF;
+                if (kakanTileId < 136)
+                {
+                    var kt = MahjongTile.FromTileId136(kakanTileId);
+                    kt.DoraValue = TileUtils.GetDoraValue(kt, State.DoraIndicators);
+                    State.Calls[player].Add(kt);
+                    if (player == 0)
+                    {
+                        for (int i = 0; i < State.OwnHand.Count; i++)
+                        {
+                            if (State.OwnHand[i].IsSame(kt, true))
+                            {
+                                State.OwnHand.RemoveAt(i);
+                                break;
+                            }
+                        }
+                    }
+                }
+                State.UpdateAvailableTiles();
                 return null;
             }
 
@@ -442,6 +460,7 @@ namespace MajTataru
                 {
                     State.PlayerDrawCount[player]++;
                     AddCallFromPair(player, (int)seat, p, 3, 2);
+                    AddLastDiscardToCall(player);
                     if (player == 0) State.UpdateIsClosed();
                     State.UpdateAvailableTiles();
                     if (player == 0) return RunAnalysis();
@@ -451,6 +470,7 @@ namespace MajTataru
                 {
                     State.PlayerDrawCount[player]++;
                     AddCallFromPair(player, (int)seat, p, 3, 2);
+                    AddLastDiscardToCall(player);
                     if (player == 0) State.UpdateIsClosed();
                     State.UpdateAvailableTiles();
                     if (player == 0) return RunAnalysis();
@@ -464,9 +484,11 @@ namespace MajTataru
                     State.UpdateAvailableTiles();
                     break;
                 }
-                case 0x0400: // kakan or daiminkan
+                case 0x0400: // daiminkan
                 {
-                    AddCallFromPair(player, (int)seat, p, 3, 1);
+                    AddCallFromPair(player, (int)seat, p, 3, 2);
+                    AddCallFromPair(player, (int)seat, p, 4, 2);
+                    AddLastDiscardToCall(player);
                     if (player == 0) State.UpdateIsClosed();
                     State.UpdateAvailableTiles();
                     break;
@@ -502,6 +524,28 @@ namespace MajTataru
                         }
                     }
                 }
+            }
+        }
+
+        private void AddLastDiscardToCall(int player)
+        {
+            if (State.LastDiscardSeat < 0) return;
+            int discardPlayer = State.SeatToPlayer(State.LastDiscardSeat);
+            if (discardPlayer < 0 || discardPlayer >= 4) return;
+            var discs = State.Discards[discardPlayer];
+            if (discs.Count == 0) return;
+
+            var tile = discs[discs.Count - 1];
+            tile.From = State.LastDiscardSeat;
+            State.Calls[player].Add(tile);
+
+            discs.RemoveAt(discs.Count - 1);
+            var snaps = State.DiscardDrawSnapshots[discardPlayer];
+            if (snaps.Count > 0) snaps.RemoveAt(snaps.Count - 1);
+            if (discardPlayer != 0)
+            {
+                var safety = State.PlayerDiscardSafetyList[discardPlayer];
+                if (safety.Count > 0) safety.RemoveAt(safety.Count - 1);
             }
         }
 
