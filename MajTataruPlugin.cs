@@ -263,7 +263,10 @@ namespace MajTataru
                     _debugLogger.WriteParsed("AI_ANALYSIS", aiAnalysis);
 
                 if (aiAnalysis != null)
+                {
                     EmitOverlayData(_ai.LastOverlayJson);
+                    SpeakTts(_ai.LastTtsMessage);
+                }
 
                 if (result == null || !result.IsRelevant)
                 {
@@ -344,6 +347,19 @@ namespace MajTataru
             catch { }
         }
 
+        /// <summary>
+        /// 通过 ACT 的 TTS 管线播报文本。FoxTTS 等第三方 TTS 插件会自动接管此调用。
+        /// </summary>
+        private void SpeakTts(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            try
+            {
+                ActGlobals.oFormActMain.TTS(text);
+            }
+            catch { }
+        }
+
         private void BtnTestOverlay_Click(object sender, EventArgs e)
         {
             string json =
@@ -365,6 +381,7 @@ namespace MajTataru
                 "]}";
 
             EmitOverlayData(json);
+            SpeakTts("切三索");
             AppendOutput("[测试] 已发送测试消息到悬浮窗", Color.Cyan);
         }
 

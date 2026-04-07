@@ -220,6 +220,12 @@ namespace MajTataru
         /// </summary>
         public string LastOverlayJson { get; private set; }
 
+        /// <summary>
+        /// 最近一次分析的 TTS 播报文本。供 C# 侧通过 ACT TTS 管线播报，
+        /// 使 FoxTTS 等第三方 TTS 插件能够接管语音合成。
+        /// </summary>
+        public string LastTtsMessage { get; private set; }
+
         private AIDefense _defense;
         private AIOffense _offense;
 
@@ -522,6 +528,7 @@ namespace MajTataru
             catch (Exception ex)
             {
                 LastOverlayJson = null;
+                LastTtsMessage = null;
                 return $"AI分析异常: {ex.Message}";
             }
         }
@@ -542,6 +549,7 @@ namespace MajTataru
             catch (Exception ex)
             {
                 LastOverlayJson = null;
+                LastTtsMessage = null;
                 return $"鸣牌分析异常: {ex.Message}";
             }
         }
@@ -642,6 +650,7 @@ namespace MajTataru
                 tts = $"切{best.Tile.Name} 立直";
             else
                 tts = $"切{best.Tile.Name}";
+            LastTtsMessage = tts;
 
             var sb = new StringBuilder(512);
             sb.Append("{\"type\":\"discard\"");
@@ -704,6 +713,7 @@ namespace MajTataru
                 if (recommended.BestDiscard.HasValue)
                     tts += $" 打{recommended.BestDiscard.Value.Name}";
             }
+            LastTtsMessage = tts;
 
             var sb = new StringBuilder(512);
             sb.Append("{\"type\":\"call\"");
