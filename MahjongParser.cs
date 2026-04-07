@@ -373,7 +373,7 @@ namespace MajTataru
                 scores[i] = TileDecoder.DecodeScore(p[7 + i]);
             State.Scores = scores;
 
-            string typeStr = gameType == 2 ? "半庄战" : $"类型{gameType}";
+            string typeStr = gameType >= 2 ? "半庄战" : "东风战";
             string scoreStr = string.Join("/", scores);
 
             RaiseMessage($"=== 游戏开始 === {typeStr} | 分数: {scoreStr}");

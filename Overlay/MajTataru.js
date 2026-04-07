@@ -156,6 +156,10 @@ function handleData(data) {
     showDiscard(data);
   } else if (data.type === 'call') {
     showCall(data);
+  } else if (data.type === 'tsumo') {
+    showTsumo(data);
+  } else if (data.type === 'kyuushu') {
+    showKyuushu(data);
   }
 
   if (TTS_ENABLED && data.tts) {
@@ -177,6 +181,11 @@ function showDiscard(d) {
   elStatus.textContent = parts.join('  ·  ');
   elStatus.classList.remove('hidden');
 
+  // kokushi banner
+  if (d.kokushi) {
+    elStatus.textContent = '★ 九種九牌 → 国士无双 ★  ' + elStatus.textContent;
+  }
+
   // main recommendation
   elMain.className = '';
   if (d.isFold) {
@@ -185,6 +194,9 @@ function showDiscard(d) {
   } else if (d.riichi && d.bestTileName) {
     elMain.textContent = '切 ' + d.bestTileName + '  立直!';
     elMain.classList.add('riichi');
+  } else if (d.kokushi && d.bestTileName) {
+    elMain.textContent = '国士无双  切 ' + d.bestTileName;
+    elMain.classList.add('kokushi');
   } else if (d.bestTileName) {
     elMain.textContent = '切 ' + d.bestTileName;
     elMain.classList.add('discard');
@@ -276,6 +288,46 @@ function showCall(d) {
         '  预估得分: ' + fmtNum(a.score, 0);
       elDetails.appendChild(sub);
     }
+  }
+  elDetails.classList.remove('hidden');
+}
+
+// ─── Kyuushu Display ───
+function showKyuushu(d) {
+  elStatus.textContent = (d.uniqueTH || 9) + '种幺九牌';
+  elStatus.classList.remove('hidden');
+
+  elMain.className = 'kyuushu';
+  elMain.textContent = '★ 九種九牌流局 ★';
+  elMain.classList.remove('hidden');
+  replayAnimation(elMain);
+
+  elDetails.innerHTML = '';
+  if (d.hand && d.hand.length > 0) {
+    var row = document.createElement('div');
+    row.className = 'row rank-1';
+    row.textContent = d.hand.join(' ');
+    elDetails.appendChild(row);
+  }
+  elDetails.classList.remove('hidden');
+}
+
+// ─── Tsumo Display ───
+function showTsumo(d) {
+  elStatus.textContent = '';
+  elStatus.classList.add('hidden');
+
+  elMain.className = 'tsumo';
+  elMain.textContent = '★ 自摸和了! ★';
+  elMain.classList.remove('hidden');
+  replayAnimation(elMain);
+
+  elDetails.innerHTML = '';
+  if (d.hand && d.hand.length > 0) {
+    var row = document.createElement('div');
+    row.className = 'row rank-1';
+    row.textContent = d.hand.join(' ');
+    elDetails.appendChild(row);
   }
   elDetails.classList.remove('hidden');
 }

@@ -109,7 +109,7 @@ namespace MajTataru
             return (seat - MySeat + 4) % 4;
         }
 
-        public bool IsEastRound { get { return GameType != 2; } }
+        public bool IsEastRound { get { return GameType < 2; } }
 
         public bool IsLastGame()
         {
@@ -513,17 +513,36 @@ namespace MajTataru
             if (State.OwnHand.Count < 2) return null;
             try
             {
+                if (CheckTsumo())
+                    return FormatTsumo();
+
+                bool isFirstDraw = State.PlayerDrawCount[0] == 0;
+                int uniqueTH = isFirstDraw ? CountUniqueTerminalHonors() : 0;
+                bool kyuushuEligible = isFirstDraw && uniqueTH >= 9;
+
                 State.CurrentStrategy = _offense.DetermineStrategy();
                 var priorities = _offense.GetTilePriorities();
                 if (priorities == null || priorities.Count == 0) return null;
+
+                if (kyuushuEligible && State.CurrentStrategy != Strategy.ThirteenOrphans
+                    && priorities[0].Shanten >= 4)
+                {
+                    LastTtsMessage = "九种九牌流局";
+                    LastOverlayJson = BuildKyuushuJson(uniqueTH);
+                    return FormatKyuushu(uniqueTH);
+                }
+
                 _offense.SortOutUnsafeTiles(priorities);
 
                 bool riichi = false;
                 if (priorities[0].Shanten == 0)
                     riichi = _offense.ShouldRiichi(priorities[0]);
 
-                LastOverlayJson = BuildDiscardJson(priorities, riichi);
-                return FormatAnalysis(priorities);
+                bool announceKokushi = kyuushuEligible
+                    && State.CurrentStrategy == Strategy.ThirteenOrphans;
+
+                LastOverlayJson = BuildDiscardJson(priorities, riichi, announceKokushi);
+                return FormatAnalysis(priorities, announceKokushi);
             }
             catch (Exception ex)
             {
@@ -554,7 +573,101 @@ namespace MajTataru
             }
         }
 
-        private string FormatAnalysis(List<TilePriority> tiles)
+        private int CountUniqueTerminalHonors()
+        {
+            var all = TileUtils.GetAllTerminalHonor(State.OwnHand);
+            var unique = new List<MahjongTile>();
+            foreach (var t in all)
+            {
+                bool exists = false;
+                foreach (var u in unique) if (t.IsSame(u)) { exists = true; break; }
+                if (!exists) unique.Add(t);
+            }
+            return unique.Count;
+        }
+
+        private string FormatKyuushu(int uniqueTH)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"★ 九種九牌流局 ({uniqueTH}种幺九牌) ★");
+            var handSorted = TileUtils.Sort(State.OwnHand);
+            sb.Append("手牌: ");
+            foreach (var t in handSorted) sb.Append(t.Name + " ");
+            return sb.ToString().TrimEnd();
+        }
+
+        private string BuildKyuushuJson(int uniqueTH)
+        {
+            var sb = new StringBuilder(256);
+            sb.Append("{\"type\":\"kyuushu\"");
+            sb.Append($",\"uniqueTH\":{uniqueTH}");
+            sb.Append(",\"tts\":\"九种九牌流局\"");
+
+            sb.Append(",\"hand\":[");
+            var handSorted = TileUtils.Sort(State.OwnHand);
+            for (int i = 0; i < handSorted.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append($"\"{Esc(handSorted[i].Name)}\"");
+            }
+            sb.Append(']');
+
+            sb.Append('}');
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// 检查当前手牌（摸牌后）是否已经和了。参照 JS 的 isWinningHand 逻辑。
+        /// </summary>
+        private bool CheckTsumo()
+        {
+            int callTriples = State.Calls[0].Count / 3;
+            var decomp = ShantenCalculator.GetTriplesAndPairs(State.OwnHand);
+            int handTriples = decomp.Triples.Count / 3;
+            int handPairs = decomp.Pairs.Count / 2;
+
+            bool normalWin = handTriples + callTriples >= 4 && handPairs >= 1;
+            bool chiitoitsuWin = State.IsClosed && handPairs >= 7;
+
+            if (normalWin || chiitoitsuWin)
+            {
+                LastTtsMessage = "自摸";
+                LastOverlayJson = BuildTsumoJson();
+                return true;
+            }
+            return false;
+        }
+
+        private string FormatTsumo()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("★★★ 自摸和了! ツモ! ★★★");
+            var handSorted = TileUtils.Sort(State.OwnHand);
+            sb.Append("手牌: ");
+            foreach (var t in handSorted) sb.Append(t.Name + " ");
+            return sb.ToString().TrimEnd();
+        }
+
+        private string BuildTsumoJson()
+        {
+            var sb = new StringBuilder(256);
+            sb.Append("{\"type\":\"tsumo\"");
+            sb.Append(",\"tts\":\"自摸\"");
+
+            sb.Append(",\"hand\":[");
+            var handSorted = TileUtils.Sort(State.OwnHand);
+            for (int i = 0; i < handSorted.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append($"\"{Esc(handSorted[i].Name)}\"");
+            }
+            sb.Append(']');
+
+            sb.Append('}');
+            return sb.ToString();
+        }
+
+        private string FormatAnalysis(List<TilePriority> tiles, bool announceKokushi = false)
         {
             var sb = new StringBuilder();
             string[] stratNames = { "一般型", "七对子", "国士无双", "弃和" };
@@ -562,6 +675,8 @@ namespace MajTataru
                 ? stratNames[(int)State.CurrentStrategy] : "?";
 
             int topShanten = tiles.Count > 0 ? tiles[0].Shanten : -1;
+            if (announceKokushi)
+                sb.AppendLine("★ 九種九牌 → 国士无双 ★");
             sb.AppendLine($"策略={stratName} | 向听={topShanten} | 剩余={State.TilesLeft}张 | 自风={GetWindStr(State.SeatWind)}");
 
             var handSorted = TileUtils.Sort(State.OwnHand);
@@ -634,7 +749,8 @@ namespace MajTataru
 
         #region Overlay JSON
 
-        private string BuildDiscardJson(List<TilePriority> tiles, bool riichi)
+        private string BuildDiscardJson(List<TilePriority> tiles, bool riichi,
+            bool announceKokushi = false)
         {
             string[] stratNames = { "一般型", "七对子", "国士无双", "弃和" };
             string strategy = (int)State.CurrentStrategy < stratNames.Length
@@ -645,11 +761,13 @@ namespace MajTataru
 
             string tts;
             if (isFold)
-                tts = "弃和模式";
+                tts = $"弃和 切{best.Tile.Name}";
             else if (riichi && shanten == 0)
                 tts = $"切{best.Tile.Name} 立直";
             else
                 tts = $"切{best.Tile.Name}";
+            if (announceKokushi)
+                tts = $"国士无双 {tts}";
             LastTtsMessage = tts;
 
             var sb = new StringBuilder(512);
@@ -662,6 +780,7 @@ namespace MajTataru
             sb.Append($",\"bestTileName\":\"{Esc(best.Tile.Name)}\"");
             sb.Append($",\"riichi\":{(riichi ? "true" : "false")}");
             sb.Append($",\"isFold\":{(isFold ? "true" : "false")}");
+            sb.Append($",\"kokushi\":{(announceKokushi ? "true" : "false")}");
             sb.Append($",\"tts\":\"{Esc(tts)}\"");
 
             sb.Append(",\"recommendations\":[");
@@ -706,7 +825,7 @@ namespace MajTataru
             foreach (var a in advices)
                 if (a.Recommended) { recommended = a; break; }
 
-            string tts = "";
+            string tts = "跳过";
             if (recommended != null)
             {
                 tts = recommended.Type;
