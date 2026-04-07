@@ -1,0 +1,143 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+}
+
+body {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  font-family: "Microsoft YaHei UI", "黑体", SimHei, Arial, sans-serif;
+}
+
+#overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 0;
+  pointer-events: none;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* ── Status Bar ── */
+#status-bar {
+  font-size: 14px;
+  color: #b0d4ff;
+  font-weight: 700;
+  text-shadow:
+    -1px 0 3px #000,
+     0  1px 3px #000,
+     1px 0 3px #000,
+     0 -1px 3px #000;
+  margin-bottom: 2px;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+/* ── Main Recommendation ── */
+#main-rec {
+  font-size: 32px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow:
+    -2px 0 6px #000,
+     0  2px 6px #000,
+     2px 0 6px #000,
+     0 -2px 6px #000;
+  padding: 4px 18px;
+  margin: 2px 0;
+  border-radius: 6px;
+  white-space: nowrap;
+  animation: pop-in 0.25s ease-out;
+}
+
+#main-rec.discard {
+  color: #4eff8e;
+}
+
+#main-rec.riichi {
+  color: #ffe74a;
+}
+
+#main-rec.fold {
+  color: #ff7a5c;
+}
+
+#main-rec.call-yes {
+  color: #ffd54f;
+}
+
+#main-rec.call-no {
+  color: #aaa;
+  font-size: 22px;
+}
+
+/* ── Details List ── */
+#details {
+  font-size: 14px;
+  color: #ddd;
+  font-weight: 700;
+  text-shadow:
+    -1px 0 3px #000,
+     0  1px 3px #000,
+     1px 0 3px #000,
+     0 -1px 3px #000;
+  text-align: center;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+#details .row {
+  margin: 1px 0;
+}
+
+#details .rank-1 {
+  color: #4eff8e;
+}
+
+#details .rank-2 {
+  color: #c0e0c0;
+}
+
+#details .rank-3 {
+  color: #a0a0a0;
+}
+
+#details .danger-high {
+  color: #ff7a5c;
+}
+
+#details .rec-yes {
+  color: #ffd54f;
+}
+
+#details .rec-no {
+  color: #888;
+}
+
+/* ── Fade Animation ── */
+.fade-out {
+  animation: fade-out 0.6s ease-in forwards;
+}
+
+@keyframes pop-in {
+  0%   { transform: scale(1); opacity: 0.5; }
+  50%  { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes fade-out {
+  0%   { opacity: 1; }
+  100% { opacity: 0; }
+}

@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="Current" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{A7B3C4D5-E6F7-4890-ABCD-123456789ABC}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <RootNamespace>MajTataru</RootNamespace>
+    <AssemblyName>MajTataru</AssemblyName>
+    <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <ItemGroup>
+    <Reference Include="Advanced Combat Tracker">
+      <HintPath>Thirdparty\ACT\Advanced Combat Tracker.exe</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="FFXIV_ACT_Plugin.Common">
+      <HintPath>Thirdparty\FFXIV_ACT_Plugin\SDK\FFXIV_ACT_Plugin.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="System" />
+    <Reference Include="System.Data" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Xml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="MajTataruPlugin.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="TileDecoder.cs" />
+    <Compile Include="MahjongParser.cs" />
+    <Compile Include="DebugLogger.cs" />
+    <Compile Include="MahjongTile.cs" />
+    <Compile Include="ShantenCalculator.cs" />
+    <Compile Include="YakuEvaluator.cs" />
+    <Compile Include="ScoreCalculator.cs" />
+    <Compile Include="AIDefense.cs" />
+    <Compile Include="AIOffense.cs" />
+    <Compile Include="MahjongAI.cs" />
+  </ItemGroup>
+</Project>
