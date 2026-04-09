@@ -1,8 +1,10 @@
 using System;
 using System.Drawing;
 using System.IO;
+using System.Net;
 using System.Reflection;
 using System.Text;
+using System.Threading;
 using System.Windows.Forms;
 using System.Xml;
 using Advanced_Combat_Tracker;
@@ -27,6 +29,12 @@ namespace MajTataru
         private Label lblLogPath;
         private GroupBox grpSettings;
         private GroupBox grpOutput;
+        private ComboBox cboAiMode;
+        private TextBox txtMjaiUrl;
+        private Label lblAiMode;
+        private Label lblMjaiUrl;
+        private Label lblMjaiStatus;
+        private Button btnTestMjai;
 
         #endregion
 
@@ -76,6 +84,7 @@ namespace MajTataru
 
             _xmlSettings = new SettingsSerializer(this);
             LoadSettings();
+            ApplyAiModeFromSettings();
 
             // BeforeLogLineRead 用于捕获 zone change (type 01) 和 party list (type 11)
             ActGlobals.oFormActMain.BeforeLogLineRead += OnBeforeLogLineRead;
@@ -385,6 +394,150 @@ namespace MajTataru
             AppendOutput("[测试] 已发送测试消息到悬浮窗", Color.Cyan);
         }
 
+        private void BtnTestMjai_Click(object sender, EventArgs e)
+        {
+            string url = txtMjaiUrl.Text.Trim();
+            if (string.IsNullOrEmpty(url))
+            {
+                AppendOutput("[MJAI测试] 请先填写MJAI服务器地址", Color.Orange);
+                return;
+            }
+
+            btnTestMjai.Enabled = false;
+            AppendOutput($"[MJAI测试] 正在连接 {url} ...", Color.Cyan);
+
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    var resetReq = (HttpWebRequest)WebRequest.Create(url.TrimEnd('/') + "/reset");
+                    resetReq.Method = "POST";
+                    resetReq.ContentType = "application/json; charset=utf-8";
+                    resetReq.Timeout = 3000;
+                    byte[] resetBody = Encoding.UTF8.GetBytes("{}");
+                    resetReq.ContentLength = resetBody.Length;
+                    using (var s = resetReq.GetRequestStream()) s.Write(resetBody, 0, resetBody.Length);
+                    using (var r = resetReq.GetResponse()) r.Close();
+                }
+                catch { }
+
+                string testBody =
+                    "[{\"type\":\"start_game\",\"id\":0}," +
+                    "{\"type\":\"start_kyoku\",\"bakaze\":\"E\",\"dora_marker\":\"2s\"," +
+                    "\"kyoku\":1,\"honba\":0,\"kyotaku\":0,\"oya\":0," +
+                    "\"scores\":[25000,25000,25000,25000]," +
+                    "\"tehais\":[[\"1m\",\"3m\",\"5m\",\"7m\",\"2p\",\"4p\",\"6p\",\"8p\",\"1s\",\"3s\",\"5sr\",\"7s\",\"9s\"]," +
+                    "[\"?\",\"?\",\"?\",\"?\",\"?\",\"?\",\"?\",\"?\",\"?\",\"?\",\"?\",\"?\",\"?\"]," +
+                    "[\"?\",\"?\",\"?\",\"?\",\"?\",\"?\",\"?\",\"?\",\"?\",\"?\",\"?\",\"?\",\"?\"]," +
+                    "[\"?\",\"?\",\"?\",\"?\",\"?\",\"?\",\"?\",\"?\",\"?\",\"?\",\"?\",\"?\",\"?\"]]}," +
+                    "{\"type\":\"tsumo\",\"actor\":0,\"pai\":\"9m\"}]";
+
+                try
+                {
+                    var request = (HttpWebRequest)WebRequest.Create(url);
+                    request.Method = "POST";
+                    request.ContentType = "application/json; charset=utf-8";
+                    request.Timeout = 10000;
+
+                    byte[] bytes = Encoding.UTF8.GetBytes(testBody);
+                    request.ContentLength = bytes.Length;
+                    using (var stream = request.GetRequestStream())
+                        stream.Write(bytes, 0, bytes.Length);
+
+                    using (var response = (HttpWebResponse)request.GetResponse())
+                    using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
+                    {
+                        string respJson = reader.ReadToEnd();
+                        var parsed = new MjaiResponse();
+                        parsed.Success = true;
+                        parsed.RawJson = respJson;
+                        parsed.Type = ExtractJsonString(respJson, "type") ?? "none";
+                        parsed.Pai = ExtractJsonString(respJson, "pai");
+
+                        string displayType = parsed.GetDisplayType();
+                        string tileName = parsed.Pai != null
+                            ? MjaiClient.MjaiTileDisplayName(parsed.Pai) : "";
+                        string tts;
+                        string overlayAction;
+
+                        switch (parsed.Type)
+                        {
+                            case "dahai":
+                                tts = "切" + tileName;
+                                overlayAction = "打牌 " + tileName;
+                                break;
+                            case "reach":
+                                tts = "切" + tileName + " 立直";
+                                overlayAction = "立直 " + tileName;
+                                break;
+                            case "hora":
+                                tts = "自摸";
+                                overlayAction = "自摸和了";
+                                break;
+                            default:
+                                tts = displayType;
+                                overlayAction = displayType;
+                                break;
+                        }
+
+                        string overlayJson =
+                            "{\"type\":\"discard\"" +
+                            ",\"strategy\":\"MJAI\"" +
+                            ",\"shanten\":0,\"tilesLeft\":0,\"wind\":\"\"" +
+                            ",\"bestTile\":\"" + (parsed.Pai ?? "").Replace("\"", "\\\"") + "\"" +
+                            ",\"bestTileName\":\"" + tileName.Replace("\"", "\\\"") + "\"" +
+                            ",\"riichi\":" + (parsed.Type == "reach" ? "true" : "false") +
+                            ",\"isFold\":false,\"kokushi\":false" +
+                            ",\"tts\":\"" + tts.Replace("\"", "\\\"") + "\"" +
+                            ",\"recommendations\":[" +
+                            (parsed.Pai != null
+                                ? "{\"rank\":1,\"tile\":\"" + parsed.Pai.Replace("\"", "\\\"") + "\"" +
+                                  ",\"tileName\":\"" + tileName.Replace("\"", "\\\"") + "\"" +
+                                  ",\"priority\":999.0,\"efficiency\":0,\"danger\":0,\"shanten\":0,\"safe\":true}"
+                                : "") +
+                            "]}";
+
+                        BeginInvoke(new Action(() =>
+                        {
+                            AppendOutput($"[MJAI测试] 连接成功!", Color.LimeGreen);
+                            AppendOutput($"  [MJAI] 响应: {respJson}", Color.FromArgb(100, 200, 255));
+                            AppendOutput($"  [MJAI] 推荐: {overlayAction}", Color.FromArgb(50, 255, 150));
+                            EmitOverlayData(overlayJson);
+                            SpeakTts(tts);
+                            btnTestMjai.Enabled = true;
+                        }));
+                    }
+                }
+                catch (WebException wex)
+                {
+                    BeginInvoke(new Action(() =>
+                    {
+                        AppendOutput($"[MJAI测试] 连接失败: {wex.Message}", Color.Red);
+                        AppendOutput($"[MJAI测试] 请确认服务端已启动: {url}", Color.Orange);
+                        btnTestMjai.Enabled = true;
+                    }));
+                }
+                catch (Exception ex)
+                {
+                    BeginInvoke(new Action(() =>
+                    {
+                        AppendOutput($"[MJAI测试] 错误: {ex.Message}", Color.Red);
+                        btnTestMjai.Enabled = true;
+                    }));
+                }
+            });
+        }
+
+        private static string ExtractJsonString(string json, string key)
+        {
+            string search = "\"" + key + "\":\"";
+            int idx = json.IndexOf(search);
+            if (idx < 0) return null;
+            int start = idx + search.Length;
+            int end = json.IndexOf('"', start);
+            return end < 0 ? null : json.Substring(start, end - start);
+        }
+
         #endregion
 
         #region ACT Log Line Event (区域/队伍检测 + type 252 回退)
@@ -514,6 +667,52 @@ namespace MajTataru
                 StopDebugLog();
         }
 
+        private void CboAiMode_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            bool mjaiMode = cboAiMode.SelectedIndex == 1;
+            txtMjaiUrl.Enabled = mjaiMode;
+            if (_ai != null)
+            {
+                _ai.UseMjaiModel = mjaiMode;
+                if (mjaiMode)
+                {
+                    _ai.MjaiServerUrl = txtMjaiUrl.Text.Trim();
+                    _ai.ResetMjaiServer();
+                }
+            }
+            lblMjaiStatus.Text = mjaiMode ? "外部MJAI模型已启用" : "";
+            lblMjaiStatus.ForeColor = mjaiMode ? Color.LimeGreen : Color.Gray;
+            AppendOutput(mjaiMode
+                ? $"[系统] 已切换至外部MJAI模型: {txtMjaiUrl.Text.Trim()}"
+                : "[系统] 已切换至内置AI", Color.Cyan);
+        }
+
+        private void TxtMjaiUrl_TextChanged(object sender, EventArgs e)
+        {
+            if (_ai != null && _ai.UseMjaiModel)
+                _ai.MjaiServerUrl = txtMjaiUrl.Text.Trim();
+        }
+
+        private void ApplyAiModeFromSettings()
+        {
+            bool mjaiMode = cboAiMode.SelectedIndex == 1;
+            txtMjaiUrl.Enabled = mjaiMode;
+            if (_ai != null)
+            {
+                _ai.UseMjaiModel = mjaiMode;
+                if (mjaiMode)
+                {
+                    _ai.MjaiServerUrl = txtMjaiUrl.Text.Trim();
+                    _ai.ResetMjaiServer();
+                }
+            }
+            if (mjaiMode)
+            {
+                lblMjaiStatus.Text = "外部MJAI模型已启用";
+                lblMjaiStatus.ForeColor = Color.LimeGreen;
+            }
+        }
+
         #endregion
 
         #region Parser Message Handler
@@ -613,6 +812,8 @@ namespace MajTataru
         {
             _xmlSettings.AddControlSetting(chkEnabled.Name, chkEnabled);
             _xmlSettings.AddControlSetting(chkDebug.Name, chkDebug);
+            _xmlSettings.AddControlSetting(cboAiMode.Name, cboAiMode);
+            _xmlSettings.AddControlSetting(txtMjaiUrl.Name, txtMjaiUrl);
 
             if (!File.Exists(_settingsFile)) return;
 
@@ -684,7 +885,7 @@ namespace MajTataru
             {
                 Text = "设置",
                 Dock = DockStyle.Top,
-                Height = 90,
+                Height = 142,
                 Padding = new Padding(8)
             };
 
@@ -708,6 +909,54 @@ namespace MajTataru
             };
             chkDebug.CheckedChanged += ChkDebug_CheckedChanged;
 
+            lblAiMode = new Label
+            {
+                Text = "AI模式:",
+                Location = new Point(265, 24),
+                AutoSize = true,
+                Font = new Font("Microsoft YaHei UI", 9f)
+            };
+
+            cboAiMode = new ComboBox
+            {
+                Name = "cboAiMode",
+                Location = new Point(325, 20),
+                Size = new Size(130, 25),
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Font = new Font("Microsoft YaHei UI", 9f)
+            };
+            cboAiMode.Items.AddRange(new object[] { "内置AI", "外部MJAI模型" });
+            cboAiMode.SelectedIndex = 0;
+            cboAiMode.SelectedIndexChanged += CboAiMode_SelectedIndexChanged;
+
+            lblMjaiUrl = new Label
+            {
+                Text = "MJAI地址:",
+                Location = new Point(465, 24),
+                AutoSize = true,
+                Font = new Font("Microsoft YaHei UI", 9f)
+            };
+
+            txtMjaiUrl = new TextBox
+            {
+                Name = "txtMjaiUrl",
+                Text = "http://127.0.0.1:7331",
+                Location = new Point(535, 20),
+                Size = new Size(190, 25),
+                Font = new Font("Microsoft YaHei UI", 9f),
+                Enabled = false
+            };
+            txtMjaiUrl.TextChanged += TxtMjaiUrl_TextChanged;
+
+            lblMjaiStatus = new Label
+            {
+                Text = "",
+                Location = new Point(535, 46),
+                AutoSize = true,
+                ForeColor = Color.Gray,
+                Font = new Font("Microsoft YaHei UI", 8f)
+            };
+
             lblLogPath = new Label
             {
                 Text = "日志: (未启用)",
@@ -726,7 +975,11 @@ namespace MajTataru
                 Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold)
             };
 
-            grpSettings.Controls.AddRange(new Control[] { chkEnabled, chkDebug, lblLogPath, lblGameStatus });
+            grpSettings.Controls.AddRange(new Control[] {
+                chkEnabled, chkDebug, lblAiMode, cboAiMode,
+                lblMjaiUrl, txtMjaiUrl, lblMjaiStatus,
+                lblLogPath, lblGameStatus
+            });
 
             var toolPanel = new Panel
             {
@@ -766,7 +1019,16 @@ namespace MajTataru
             };
             btnTestOverlay.Click += BtnTestOverlay_Click;
 
-            toolPanel.Controls.AddRange(new Control[] { btnClear, btnOpenLogFolder, btnTestOverlay });
+            btnTestMjai = new Button
+            {
+                Text = "测试MJAI",
+                Location = new Point(312, 4),
+                Size = new Size(100, 24),
+                Font = new Font("Microsoft YaHei UI", 8.5f)
+            };
+            btnTestMjai.Click += BtnTestMjai_Click;
+
+            toolPanel.Controls.AddRange(new Control[] { btnClear, btnOpenLogFolder, btnTestOverlay, btnTestMjai });
 
             grpOutput = new GroupBox
             {

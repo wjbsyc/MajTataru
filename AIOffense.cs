@@ -40,7 +40,7 @@ namespace MajTataru
     }
 
     /// <summary>
-    /// 进攻AI。移植自 ai_offense.js 的 getHandValues / getTilePriorities / discard 等核心决策逻辑。
+    /// 进攻AI。
     /// </summary>
     public class AIOffense
     {
@@ -147,7 +147,7 @@ namespace MajTataru
             double expOpen = 0, expClosed = 0, expRiichi = 0;
             double yakuOpen = 0, yakuClosed = 0;
             double doraVal = 0, waits = 0, shape = 0, fu = 0;
-            int totalCombs = 0, totalWaitCombs = 0;
+            double totalCombs = 0, totalWaitCombs = 0;
 
             var vis = _gs.VisibleTiles;
             var avail = _gs.AvailableTiles;
@@ -286,11 +286,11 @@ namespace MajTataru
                         yakuClosed += thisYaku.Closed * factor;
                         expOpen += ScoreCalculator.CalculateScore(isDealer, thisYaku.Open + thisDora, thisFu) * factor;
                         expClosed += ScoreCalculator.CalculateScore(isDealer, thisYaku.Closed + thisDora, thisFu) * factor;
-                        totalCombs += (int)factor;
+                        totalCombs += factor;
                     }
                     double uraChance = _gs.DoraIndicators.Count * 0.4;
                     expRiichi += ScoreCalculator.CalculateScore(isDealer, thisYaku.Closed + thisDora + 1 + 0.2 + uraChance, thisFu) * thisWait * factor;
-                    totalWaitCombs += (int)(factor * thisWait);
+                    totalWaitCombs += factor * thisWait;
 
                     if (!tile1Furiten) continue;
                 }
@@ -374,7 +374,7 @@ namespace MajTataru
                         yakuClosed += ty3.Closed * combFactor;
                         expOpen += ScoreCalculator.CalculateScore(isDealer, ty3.Open + td3) * combFactor;
                         expClosed += ScoreCalculator.CalculateScore(isDealer, ty3.Closed + td3) * combFactor;
-                        totalCombs += (int)combFactor;
+                        totalCombs += combFactor;
                     }
                 }
             }
@@ -642,6 +642,8 @@ namespace MajTataru
 
         public bool ShouldRiichi(TilePriority tp)
         {
+            if (!_gs.IsClosed) return false;
+
             bool badWait = tp.Waits < 5 - ParamRiichi;
             bool lotsDora = _gs.DoraIndicators.Count >= 3;
 
@@ -757,12 +759,12 @@ namespace MajTataru
             var yaku = YakuEvaluator.GetYaku(hand14, _gs.Calls[0], tap, isChii, _gs.SeatWind, _gs.RoundWind);
             double yakuVal = _gs.IsClosed ? yaku.Closed : yaku.Open;
             if (isChii) yakuVal += 2;
+            if (yakuVal < 1) return null;
 
             double dora = 0;
             foreach (var t in hand14) dora += TileUtils.GetDoraValue(t, _gs.DoraIndicators);
             foreach (var t in _gs.Calls[0]) dora += TileUtils.GetDoraValue(t, _gs.DoraIndicators);
             double totalHan = yakuVal + dora;
-            if (totalHan < 1) return null;
 
             double fu = 30;
             if (!isChii)
@@ -863,7 +865,7 @@ namespace MajTataru
                     {
                         if (afterTap.Pairs[i].Type == 3) afterHonorPairs++;
                         if (afterTap.Pairs[i].IsValueTile(_gs.SeatWind, _gs.RoundWind) &&
-                            TileUtils.GetNumberOfTilesAvailable(afterTap.Pairs[i].Index, afterTap.Pairs[i].Type, _gs.VisibleTiles) >= 1)
+                            TileUtils.GetNumberOfTilesAvailable(afterTap.Pairs[i].Index, afterTap.Pairs[i].Type, _gs.VisibleTiles) >= 2)
                             afterValuePairsWithAvail++;
                     }
                     hasSafeTiles = tilePrios.Exists(t => t.Safe);
@@ -918,17 +920,17 @@ namespace MajTataru
                 }
             }
 
-            if (!hasSafeTiles)
-            {
-                advice.Recommended = false;
-                advice.Reason = "鸣牌后无安全牌";
-                return advice;
-            }
-
             if (_gs.TilesLeft <= 4 && beforeHandValue.Shanten == 1 && afterShanten == 0)
             {
                 advice.Recommended = true;
                 advice.Reason = "终盘鸣牌听牌";
+                return advice;
+            }
+
+            if (!hasSafeTiles)
+            {
+                advice.Recommended = false;
+                advice.Reason = "鸣牌后无安全牌";
                 return advice;
             }
 

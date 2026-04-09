@@ -4,7 +4,7 @@ using System.Collections.Generic;
 namespace MajTataru
 {
     /// <summary>
-    /// 防守评估引擎。移植自 ai_defense.js，与 JS 四麻算法保持一致。
+    /// 防守评估引擎。
     /// </summary>
     public class AIDefense
     {

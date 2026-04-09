@@ -57,5 +57,6 @@
     <Compile Include="AIDefense.cs" />
     <Compile Include="AIOffense.cs" />
     <Compile Include="MahjongAI.cs" />
+    <Compile Include="MjaiClient.cs" />
   </ItemGroup>
 </Project>

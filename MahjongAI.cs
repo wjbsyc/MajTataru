@@ -26,6 +26,7 @@ namespace MajTataru
         public MahjongTile?[] RiichiTiles = new MahjongTile?[4];
         public int[] Scores = new int[4];
         public int MySeat = -1;
+        public int PhysicalSeat = -1;
         public int TurnCount;
         public bool InGame;
         public int LastDiscardSeat = -1;
@@ -77,6 +78,7 @@ namespace MajTataru
             Scores = new int[4];
             TurnCount = 0;
             LastDiscardSeat = -1;
+            PhysicalSeat = -1;
             GameType = 2;
             RoundNumber = 1;
             PlayerDrawCount = new int[4];
@@ -228,6 +230,19 @@ namespace MajTataru
 
         private AIDefense _defense;
         private AIOffense _offense;
+        private MjaiClient _mjaiClient;
+
+        public bool UseMjaiModel { get; set; }
+        public string MjaiServerUrl
+        {
+            get { return _mjaiClient != null ? _mjaiClient.ServerUrl : "http://127.0.0.1:7331"; }
+            set { if (_mjaiClient != null) _mjaiClient.ServerUrl = value; }
+        }
+
+        public void ResetMjaiServer()
+        {
+            if (_mjaiClient != null) _mjaiClient.ResetServer();
+        }
 
         public ushort OP_GAME_INIT = 0x00D7;
         public ushort OP_ROUND_START = 0x0134;
@@ -245,6 +260,7 @@ namespace MajTataru
         {
             _defense = new AIDefense(State);
             _offense = new AIOffense(State, _defense);
+            _mjaiClient = new MjaiClient(State);
         }
 
         /// <summary>
@@ -277,8 +293,8 @@ namespace MajTataru
             if (opcode == OP_ROUND_START) return OnRoundStart(p);
             if (opcode == OP_DISCARD) return OnDiscard(p);
             if (opcode == OP_DRAW_EVENT) return OnDrawEvent(p);
-            if (opcode == OP_ROUND_END) { State.ResetForRound(); return null; }
-            if (opcode == OP_GAME_RESULT) { State.InGame = false; State.Reset(); return null; }
+            if (opcode == OP_ROUND_END) { if (UseMjaiModel) _mjaiClient.OnRoundEnd(); State.ResetForRound(); return null; }
+            if (opcode == OP_GAME_RESULT) { if (UseMjaiModel) _mjaiClient.OnGameEnd(); State.InGame = false; State.Reset(); return null; }
             return null;
         }
 
@@ -286,10 +302,13 @@ namespace MajTataru
         {
             if (p.Length < 12) return null;
             State.Reset();
+            _mjaiClient.Reset();
             State.GameType = (int)p[0];
             State.MySeat = (int)p[6];
+            State.PhysicalSeat = (int)p[6];
             State.InGame = true;
             for (int i = 0; i < 4; i++) State.Scores[i] = (int)p[7 + i] * 100;
+            if (UseMjaiModel) _mjaiClient.OnGameInit();
             return null;
         }
 
@@ -313,6 +332,13 @@ namespace MajTataru
                 State.OwnHand.Add(MahjongTile.FromType34(p[12 + i]));
 
             State.UpdateAvailableTiles();
+
+            if (UseMjaiModel)
+            {
+                int honba = (int)p[3];
+                int kyotaku = (int)p[4];
+                _mjaiClient.OnRoundStart(honba, kyotaku);
+            }
             return null;
         }
 
@@ -331,6 +357,16 @@ namespace MajTataru
                 {
                     var kt = MahjongTile.FromTileId136(kakanTileId);
                     kt.DoraValue = TileUtils.GetDoraValue(kt, State.DoraIndicators);
+
+                    if (UseMjaiModel)
+                    {
+                        var existingPon = new List<MahjongTile>();
+                        foreach (var ct in State.Calls[player])
+                            if (ct.Index == kt.Index && ct.Type == kt.Type && existingPon.Count < 3)
+                                existingPon.Add(ct);
+                        _mjaiClient.OnKakan(player, kt, existingPon);
+                    }
+
                     State.Calls[player].Add(kt);
                     if (player == 0)
                     {
@@ -391,14 +427,16 @@ namespace MajTataru
 
             State.UpdateAvailableTiles();
 
+            bool tsumogiri = (actionType & 0x02) != 0;
+            if (UseMjaiModel) _mjaiClient.OnDiscard(player, tile, tsumogiri, isRiichi);
+
             if (player != 0)
             {
-                bool isTsumogiri = (actionType & 0x02) != 0;
                 double danger = _defense.GetTileDanger(tile, player);
-                if (isTsumogiri && danger < 0.01)
+                if (tsumogiri && danger < 0.01)
                     danger = 0.05;
                 State.PlayerDiscardSafetyList[player].Add(danger);
-                return RunCallAnalysis(tile, player);
+                return UseMjaiModel ? RunMjaiCallAnalysis(tile, player) : RunCallAnalysis(tile, player);
             }
 
             return null;
@@ -428,8 +466,13 @@ namespace MajTataru
                             tile.DoraValue = TileUtils.GetDoraValue(tile, State.DoraIndicators);
                             State.OwnHand.Add(tile);
                             State.UpdateAvailableTiles();
-                            return RunAnalysis();
+                            if (UseMjaiModel) _mjaiClient.OnDraw(0, tile);
+                            return UseMjaiModel ? RunMjaiAnalysis() : RunAnalysis();
                         }
+                    }
+                    else
+                    {
+                        if (UseMjaiModel) _mjaiClient.OnDraw(player, null);
                     }
                     break;
                 }
@@ -438,8 +481,13 @@ namespace MajTataru
                     State.TilesLeft--;
                     State.PlayerDrawCount[player]++;
                     uint newDoraId = (fieldA >> 16) & 0xFFFF;
+                    MahjongTile? newDora = null;
                     if (newDoraId < 136)
-                        State.DoraIndicators.Add(MahjongTile.FromTileId136(newDoraId));
+                    {
+                        newDora = MahjongTile.FromTileId136(newDoraId);
+                        State.DoraIndicators.Add(newDora.Value);
+                        if (UseMjaiModel) _mjaiClient.OnNewDora(newDora.Value);
+                    }
 
                     if (player == 0)
                     {
@@ -450,51 +498,108 @@ namespace MajTataru
                             tile.DoraValue = TileUtils.GetDoraValue(tile, State.DoraIndicators);
                             State.OwnHand.Add(tile);
                             State.UpdateAvailableTiles();
-                            return RunAnalysis();
+                            if (UseMjaiModel) _mjaiClient.OnDraw(0, tile);
+                            return UseMjaiModel ? RunMjaiAnalysis() : RunAnalysis();
                         }
+                    }
+                    else
+                    {
+                        if (UseMjaiModel) _mjaiClient.OnDraw(player, null);
                     }
                     State.UpdateAvailableTiles();
                     break;
                 }
                 case 0x0500: // pon
                 {
+                    int targetPlayer = State.LastDiscardSeat >= 0 ? State.SeatToPlayer(State.LastDiscardSeat) : -1;
+                    var consumed = ExtractPairTiles(p, 3);
+                    MahjongTile? calledTile = GetLastDiscardTile(targetPlayer);
+
                     State.PlayerDrawCount[player]++;
                     AddCallFromPair(player, (int)seat, p, 3, 2);
                     AddLastDiscardToCall(player);
                     if (player == 0) State.UpdateIsClosed();
                     State.UpdateAvailableTiles();
-                    if (player == 0) return RunAnalysis();
+
+                    if (UseMjaiModel && calledTile.HasValue)
+                        _mjaiClient.OnPon(player, targetPlayer, calledTile.Value, consumed);
+
+                    if (player == 0)
+                        return UseMjaiModel ? RunMjaiAnalysis() : RunAnalysis();
                     break;
                 }
                 case 0x0600: // chi
                 {
+                    int targetPlayer = State.LastDiscardSeat >= 0 ? State.SeatToPlayer(State.LastDiscardSeat) : -1;
+                    var consumed = ExtractPairTiles(p, 3);
+                    MahjongTile? calledTile = GetLastDiscardTile(targetPlayer);
+
                     State.PlayerDrawCount[player]++;
                     AddCallFromPair(player, (int)seat, p, 3, 2);
                     AddLastDiscardToCall(player);
                     if (player == 0) State.UpdateIsClosed();
                     State.UpdateAvailableTiles();
-                    if (player == 0) return RunAnalysis();
+
+                    if (UseMjaiModel && calledTile.HasValue)
+                        _mjaiClient.OnChi(player, targetPlayer, calledTile.Value, consumed);
+
+                    if (player == 0)
+                        return UseMjaiModel ? RunMjaiAnalysis() : RunAnalysis();
                     break;
                 }
                 case 0x0130: // ankan
                 {
+                    var consumed = ExtractPairTiles(p, 3, 4);
+
                     AddCallFromPair(player, (int)seat, p, 3, 2);
                     AddCallFromPair(player, (int)seat, p, 4, 2);
                     if (player == 0) State.UpdateIsClosed();
                     State.UpdateAvailableTiles();
+
+                    if (UseMjaiModel && consumed.Count > 0)
+                        _mjaiClient.OnAnkan(player, consumed);
                     break;
                 }
                 case 0x0400: // daiminkan
                 {
+                    int targetPlayer = State.LastDiscardSeat >= 0 ? State.SeatToPlayer(State.LastDiscardSeat) : -1;
+                    var consumed = ExtractPairTiles(p, 3, 4);
+                    MahjongTile? calledTile = GetLastDiscardTile(targetPlayer);
+
                     AddCallFromPair(player, (int)seat, p, 3, 2);
                     AddCallFromPair(player, (int)seat, p, 4, 2);
                     AddLastDiscardToCall(player);
                     if (player == 0) State.UpdateIsClosed();
                     State.UpdateAvailableTiles();
+
+                    if (UseMjaiModel && calledTile.HasValue)
+                        _mjaiClient.OnDaiminkan(player, targetPlayer, calledTile.Value, consumed);
                     break;
                 }
             }
             return null;
+        }
+
+        private List<MahjongTile> ExtractPairTiles(uint[] p, params int[] pairIndices)
+        {
+            var tiles = new List<MahjongTile>();
+            foreach (int idx in pairIndices)
+            {
+                if (idx >= p.Length) continue;
+                uint val = p[idx];
+                uint hi = (val >> 16) & 0xFFFF;
+                uint lo = val & 0xFFFF;
+                if (hi < 136) tiles.Add(MahjongTile.FromTileId136(hi));
+                if (lo < 136) tiles.Add(MahjongTile.FromTileId136(lo));
+            }
+            return tiles;
+        }
+
+        private MahjongTile? GetLastDiscardTile(int targetPlayer)
+        {
+            if (targetPlayer < 0 || targetPlayer >= 4) return null;
+            var discs = State.Discards[targetPlayer];
+            return discs.Count > 0 ? discs[discs.Count - 1] : (MahjongTile?)null;
         }
 
         private void AddCallFromPair(int player, int seat, uint[] p, int pairIdx, int expectedCount)
@@ -560,7 +665,7 @@ namespace MajTataru
                 if (CheckTsumo())
                     return FormatTsumo();
 
-                bool isFirstDraw = State.PlayerDrawCount[0] == 0;
+                bool isFirstDraw = State.PlayerDrawCount[0] == 1;
                 int uniqueTH = isFirstDraw ? CountUniqueTerminalHonors() : 0;
                 bool kyuushuEligible = isFirstDraw && uniqueTH >= 9;
 
@@ -617,6 +722,242 @@ namespace MajTataru
             }
         }
 
+        #region MJAI Analysis
+
+        private string RunMjaiAnalysis()
+        {
+            if (State.OwnHand.Count < 2) return null;
+            try
+            {
+                var resp = _mjaiClient.RequestDecision();
+                if (!resp.Success)
+                {
+                    LastOverlayJson = null;
+                    LastTtsMessage = null;
+                    return "[MJAI] " + resp.Error;
+                }
+                LastOverlayJson = BuildMjaiOverlayJson(resp, "analysis");
+                return FormatMjaiResponse(resp, "摸牌");
+            }
+            catch (Exception ex)
+            {
+                LastOverlayJson = null;
+                LastTtsMessage = null;
+                return $"[MJAI] 分析异常: {ex.Message}";
+            }
+        }
+
+        private bool HasPotentialCalls(MahjongTile discardedTile, int discardingPlayer)
+        {
+            if (State.OwnHand.Count < 4) return false;
+
+            int sameCount = TileUtils.Count(State.OwnHand, discardedTile.Index, discardedTile.Type);
+            if (sameCount >= 2) return true;
+
+            if (discardingPlayer == 3 && discardedTile.Type != 3)
+            {
+                int idx = discardedTile.Index;
+                int tp = discardedTile.Type;
+                bool hasLow2 = idx >= 3 && TileUtils.Count(State.OwnHand, idx - 2, tp) > 0
+                                         && TileUtils.Count(State.OwnHand, idx - 1, tp) > 0;
+                bool hasMid = idx >= 2 && idx <= 8 && TileUtils.Count(State.OwnHand, idx - 1, tp) > 0
+                                                    && TileUtils.Count(State.OwnHand, idx + 1, tp) > 0;
+                bool hasHigh2 = idx <= 7 && TileUtils.Count(State.OwnHand, idx + 1, tp) > 0
+                                          && TileUtils.Count(State.OwnHand, idx + 2, tp) > 0;
+                if (hasLow2 || hasMid || hasHigh2) return true;
+            }
+
+            int callTriples = ShantenCalculator.GetTriplesOnly(State.Calls[0]).Count / 3;
+            var tap = ShantenCalculator.GetTriplesAndPairs(
+                new List<MahjongTile>(State.OwnHand) { discardedTile });
+            if (ShantenCalculator.IsWinning(tap.Triples.Count / 3 + callTriples, tap.Pairs.Count / 2))
+                return true;
+            if (State.IsClosed)
+            {
+                var pairs = ShantenCalculator.GetPairsAsArray(
+                    new List<MahjongTile>(State.OwnHand) { discardedTile });
+                if (pairs.Count / 2 >= 7) return true;
+            }
+
+            return false;
+        }
+
+        private string RunMjaiCallAnalysis(MahjongTile discardedTile, int discardingPlayer)
+        {
+            if (State.OwnHand.Count < 4) return null;
+
+            bool canCall = HasPotentialCalls(discardedTile, discardingPlayer);
+            if (!canCall) return null;
+
+            try
+            {
+                var resp = _mjaiClient.RequestDecision();
+                if (!resp.Success)
+                {
+                    LastOverlayJson = null;
+                    LastTtsMessage = null;
+                    return "[MJAI] " + resp.Error;
+                }
+                if (resp.Type == "none")
+                {
+                    string[] skipNames = { "自家", "下家", "对面", "上家" };
+                    string skipSrc = discardingPlayer >= 0 && discardingPlayer < 4
+                        ? skipNames[discardingPlayer] : "?";
+                    LastTtsMessage = "跳过";
+                    LastOverlayJson = BuildMjaiCallOverlayJson(resp, discardedTile, skipSrc);
+                    return $"▶ {skipSrc}打出 {discardedTile.Name} — [MJAI] 跳过（不鸣牌）";
+                }
+                string[] playerNames = { "自家", "下家", "对面", "上家" };
+                string src = discardingPlayer >= 0 && discardingPlayer < 4
+                    ? playerNames[discardingPlayer] : "?";
+                LastOverlayJson = BuildMjaiCallOverlayJson(resp, discardedTile, src);
+                return FormatMjaiCallResponse(resp, discardedTile, src);
+            }
+            catch (Exception ex)
+            {
+                LastOverlayJson = null;
+                LastTtsMessage = null;
+                return $"[MJAI] 鸣牌分析异常: {ex.Message}";
+            }
+        }
+
+        private string FormatMjaiResponse(MjaiResponse resp, string context)
+        {
+            var sb = new StringBuilder();
+            string displayType = resp.GetDisplayType();
+            string tileName = resp.Pai != null ? MjaiClient.MjaiTileDisplayName(resp.Pai) : "";
+
+            switch (resp.Type)
+            {
+                case "dahai":
+                    sb.AppendLine($"[MJAI] 推荐: 切{tileName} ({resp.Pai}){(resp.Tsumogiri ? " [摸切]" : "")}");
+                    LastTtsMessage = $"切{tileName}";
+                    break;
+                case "reach":
+                    sb.AppendLine($"[MJAI] 推荐: 立直 切{tileName} ({resp.Pai})");
+                    LastTtsMessage = $"切{tileName} 立直";
+                    break;
+                case "hora":
+                    sb.AppendLine($"[MJAI] 推荐: 自摸和了!");
+                    LastTtsMessage = "自摸";
+                    break;
+                case "ankan":
+                    string ankanTiles = resp.Consumed != null ? string.Join(" ", resp.Consumed) : "";
+                    sb.AppendLine($"[MJAI] 推荐: 暗杠 [{ankanTiles}]");
+                    LastTtsMessage = "暗杠";
+                    break;
+                case "kakan":
+                    sb.AppendLine($"[MJAI] 推荐: 加杠 {tileName}");
+                    LastTtsMessage = "加杠";
+                    break;
+                case "ryukyoku":
+                    sb.AppendLine($"[MJAI] 推荐: 九种九牌流局");
+                    LastTtsMessage = "九种九牌流局";
+                    break;
+                default:
+                    sb.AppendLine($"[MJAI] 响应: {displayType}");
+                    LastTtsMessage = displayType;
+                    break;
+            }
+
+            var handSorted = TileUtils.Sort(State.OwnHand);
+            sb.Append("手牌: ");
+            foreach (var t in handSorted) sb.Append(t.Name + " ");
+
+            return sb.ToString().TrimEnd();
+        }
+
+        private string FormatMjaiCallResponse(MjaiResponse resp, MahjongTile discardedTile, string playerName)
+        {
+            var sb = new StringBuilder();
+            string displayType = resp.GetDisplayType();
+            string tileName = resp.Pai != null ? MjaiClient.MjaiTileDisplayName(resp.Pai) : "";
+            string consumed = resp.Consumed != null
+                ? string.Join("+", resp.Consumed) : "";
+
+            sb.AppendLine($"▶ {playerName}打出 {discardedTile.Name} — MJAI推荐:");
+
+            switch (resp.Type)
+            {
+                case "pon":
+                    sb.AppendLine($"  ★推荐 碰 [{consumed}]");
+                    LastTtsMessage = "碰";
+                    break;
+                case "chi":
+                    sb.AppendLine($"  ★推荐 吃 [{consumed}]");
+                    LastTtsMessage = "吃";
+                    break;
+                case "daiminkan":
+                    sb.AppendLine($"  ★推荐 大明杠 [{consumed}]");
+                    LastTtsMessage = "大明杠";
+                    break;
+                case "hora":
+                    sb.AppendLine($"  ★推荐 荣和! ロン!");
+                    LastTtsMessage = "荣和";
+                    break;
+                default:
+                    sb.AppendLine($"  {displayType}");
+                    LastTtsMessage = displayType;
+                    break;
+            }
+
+            return sb.ToString().TrimEnd();
+        }
+
+        private string BuildMjaiOverlayJson(MjaiResponse resp, string context)
+        {
+            string tts = LastTtsMessage ?? resp.GetDisplayType();
+            string tilePai = resp.Pai ?? "";
+            string tileName = !string.IsNullOrEmpty(tilePai) ? MjaiClient.MjaiTileDisplayName(tilePai) : "";
+            bool riichi = resp.Type == "reach";
+
+            var sb = new StringBuilder(512);
+            sb.Append("{\"type\":\"discard\"");
+            sb.Append(",\"strategy\":\"MJAI\"");
+            sb.Append(",\"shanten\":0");
+            sb.Append(",\"tilesLeft\":0");
+            sb.Append(",\"wind\":\"\"");
+            sb.Append(",\"bestTile\":\"").Append(Esc(tilePai)).Append('"');
+            sb.Append(",\"bestTileName\":\"").Append(Esc(tileName)).Append('"');
+            sb.Append(",\"riichi\":").Append(riichi ? "true" : "false");
+            sb.Append(",\"isFold\":false");
+            sb.Append(",\"kokushi\":false");
+            sb.Append(",\"tts\":\"").Append(Esc(tts)).Append('"');
+            sb.Append(",\"recommendations\":[");
+            if (!string.IsNullOrEmpty(tilePai))
+            {
+                sb.Append("{\"rank\":1");
+                sb.Append(",\"tile\":\"").Append(Esc(tilePai)).Append('"');
+                sb.Append(",\"tileName\":\"").Append(Esc(tileName)).Append('"');
+                sb.Append(",\"priority\":999.0,\"efficiency\":0,\"danger\":0,\"shanten\":0,\"safe\":true}");
+            }
+            sb.Append("]}");
+            return sb.ToString();
+        }
+
+        private string BuildMjaiCallOverlayJson(MjaiResponse resp, MahjongTile discardedTile, string playerName)
+        {
+            string tts = LastTtsMessage ?? resp.GetDisplayType();
+            string callType = resp.GetDisplayType();
+
+            var sb = new StringBuilder(512);
+            sb.Append("{\"type\":\"call\"");
+            sb.Append(",\"player\":\"").Append(Esc(playerName)).Append('"');
+            sb.Append(",\"discardedTile\":\"").Append(Esc(discardedTile.Name)).Append('"');
+            sb.Append(",\"tts\":\"").Append(Esc(tts)).Append('"');
+            sb.Append(",\"advices\":[{");
+            sb.Append("\"callType\":\"").Append(Esc(callType)).Append('"');
+            sb.Append(",\"recommended\":").Append(resp.Type != "none" ? "true" : "false");
+            if (resp.Consumed != null && resp.Consumed.Count > 0)
+                sb.Append(",\"tiles\":\"").Append(Esc(string.Join("+", resp.Consumed))).Append('"');
+            if (!string.IsNullOrEmpty(tts))
+                sb.Append(",\"reason\":\"MJAI\"");
+            sb.Append("}]}");
+            return sb.ToString();
+        }
+
+        #endregion
+
         private int CountUniqueTerminalHonors()
         {
             var all = TileUtils.GetAllTerminalHonor(State.OwnHand);
@@ -661,7 +1002,7 @@ namespace MajTataru
         }
 
         /// <summary>
-        /// 检查当前手牌（摸牌后）是否已经和了。参照 JS 的 isWinningHand 逻辑。
+        /// 检查当前手牌（摸牌后）是否已经和了。
         /// </summary>
         private bool CheckTsumo()
         {
@@ -675,6 +1016,14 @@ namespace MajTataru
 
             if (normalWin || chiitoitsuWin)
             {
+                if (!State.IsClosed)
+                {
+                    var fullHand = new List<MahjongTile>(State.OwnHand);
+                    fullHand.AddRange(State.Calls[0]);
+                    var yaku = YakuEvaluator.GetYaku(fullHand, State.Calls[0], decomp,
+                        chiitoitsuWin, State.SeatWind, State.RoundWind);
+                    if (yaku.Open < 1) return false;
+                }
                 LastTtsMessage = "自摸";
                 LastOverlayJson = BuildTsumoJson();
                 return true;
@@ -742,10 +1091,19 @@ namespace MajTataru
             if (topShanten == 0 && tiles.Count > 0)
             {
                 var best = tiles[0];
-                bool riichi = _offense.ShouldRiichi(best);
-                string riichiAdvice = riichi ? "建议立直" : "不建议立直";
                 if (best.Waits > 0)
-                    sb.AppendLine($"听牌分析: 待牌={best.Waits:F1} 形状={best.Shape:F2} → {riichiAdvice}");
+                {
+                    if (State.IsClosed)
+                    {
+                        bool riichi = _offense.ShouldRiichi(best);
+                        string riichiAdvice = riichi ? "建议立直" : "不建议立直";
+                        sb.AppendLine($"听牌分析: 待牌={best.Waits:F1} 形状={best.Shape:F2} → {riichiAdvice}");
+                    }
+                    else
+                    {
+                        sb.AppendLine($"听牌分析: 待牌={best.Waits:F1} 形状={best.Shape:F2} (副露中)");
+                    }
+                }
             }
 
             if (State.CurrentStrategy == Strategy.Fold)
