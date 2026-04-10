@@ -244,18 +244,6 @@ namespace MajTataru
             if (_mjaiClient != null) _mjaiClient.ResetServer();
         }
 
-        public ushort OP_GAME_INIT = 0x00D7;
-        public ushort OP_ROUND_START = 0x0134;
-        public ushort OP_DISCARD = 0x0141;
-        public ushort OP_DRAW_EVENT = 0x01DC;
-        public ushort OP_TSUMO_RESULT = 0x02DE;
-        public ushort OP_RON_RESULT = 0x007E;
-        public ushort OP_ROUND_END = 0x00EF;
-        public ushort OP_GAME_RESULT = 0x03DD;
-
-        private const int HEADER_SIZE = 32;
-        private const int OPCODE_OFFSET = 18;
-
         public MahjongAI()
         {
             _defense = new AIDefense(State);
@@ -268,33 +256,33 @@ namespace MajTataru
         /// </summary>
         public string ProcessPacket(byte[] data)
         {
-            if (data == null || data.Length < HEADER_SIZE) return null;
-            ushort opcode = BitConverter.ToUInt16(data, OPCODE_OFFSET);
+            if (data == null || data.Length < MahjongOpcodes.HEADER_SIZE) return null;
+            ushort opcode = BitConverter.ToUInt16(data, MahjongOpcodes.OPCODE_OFFSET);
             if (!IsMahjongOpcode(opcode)) return null;
 
-            uint[] payload = new uint[(data.Length - HEADER_SIZE) / 4];
+            uint[] payload = new uint[(data.Length - MahjongOpcodes.HEADER_SIZE) / 4];
             for (int i = 0; i < payload.Length; i++)
-                payload[i] = BitConverter.ToUInt32(data, HEADER_SIZE + i * 4);
+                payload[i] = BitConverter.ToUInt32(data, MahjongOpcodes.HEADER_SIZE + i * 4);
 
             return Dispatch(opcode, payload);
         }
 
         private bool IsMahjongOpcode(ushort op)
         {
-            return op == OP_GAME_INIT || op == OP_ROUND_START ||
-                   op == OP_DISCARD || op == OP_DRAW_EVENT ||
-                   op == OP_TSUMO_RESULT || op == OP_RON_RESULT ||
-                   op == OP_ROUND_END || op == OP_GAME_RESULT;
+            return op == MahjongOpcodes.OP_GAME_INIT || op == MahjongOpcodes.OP_ROUND_START ||
+                   op == MahjongOpcodes.OP_DISCARD || op == MahjongOpcodes.OP_DRAW_EVENT ||
+                   op == MahjongOpcodes.OP_TSUMO_RESULT || op == MahjongOpcodes.OP_RON_RESULT ||
+                   op == MahjongOpcodes.OP_ROUND_END || op == MahjongOpcodes.OP_GAME_RESULT;
         }
 
         private string Dispatch(ushort opcode, uint[] p)
         {
-            if (opcode == OP_GAME_INIT) return OnGameInit(p);
-            if (opcode == OP_ROUND_START) return OnRoundStart(p);
-            if (opcode == OP_DISCARD) return OnDiscard(p);
-            if (opcode == OP_DRAW_EVENT) return OnDrawEvent(p);
-            if (opcode == OP_ROUND_END) { if (UseMjaiModel) _mjaiClient.OnRoundEnd(); State.ResetForRound(); return null; }
-            if (opcode == OP_GAME_RESULT) { if (UseMjaiModel) _mjaiClient.OnGameEnd(); State.InGame = false; State.Reset(); return null; }
+            if (opcode == MahjongOpcodes.OP_GAME_INIT) return OnGameInit(p);
+            if (opcode == MahjongOpcodes.OP_ROUND_START) return OnRoundStart(p);
+            if (opcode == MahjongOpcodes.OP_DISCARD) return OnDiscard(p);
+            if (opcode == MahjongOpcodes.OP_DRAW_EVENT) return OnDrawEvent(p);
+            if (opcode == MahjongOpcodes.OP_ROUND_END) { if (UseMjaiModel) _mjaiClient.OnRoundEnd(); State.ResetForRound(); return null; }
+            if (opcode == MahjongOpcodes.OP_GAME_RESULT) { if (UseMjaiModel) _mjaiClient.OnGameEnd(); State.InGame = false; State.Reset(); return null; }
             return null;
         }
 
@@ -665,6 +653,13 @@ namespace MajTataru
                 if (CheckTsumo())
                     return FormatTsumo();
 
+                if (State.PlayerRiichi[0])
+                {
+                    LastTtsMessage = null;
+                    LastOverlayJson = null;
+                    return null;
+                }
+
                 bool isFirstDraw = State.PlayerDrawCount[0] == 1;
                 int uniqueTH = isFirstDraw ? CountUniqueTerminalHonors() : 0;
                 bool kyuushuEligible = isFirstDraw && uniqueTH >= 9;
@@ -709,6 +704,15 @@ namespace MajTataru
             if (State.OwnHand.Count < 4) return null;
             try
             {
+                if (State.PlayerRiichi[0])
+                {
+                    var ronOnly = _offense.CheckRonOnly(discardedTile);
+                    if (ronOnly == null) return null;
+                    var ronList = new List<CallAdvice> { ronOnly };
+                    LastOverlayJson = BuildCallJson(ronList, discardedTile, discardingPlayer);
+                    return FormatCallAnalysis(ronList, discardedTile, discardingPlayer);
+                }
+
                 var advices = _offense.EvaluateCalls(discardedTile, discardingPlayer);
                 if (advices == null || advices.Count == 0) return null;
                 LastOverlayJson = BuildCallJson(advices, discardedTile, discardingPlayer);

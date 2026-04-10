@@ -107,8 +107,6 @@ namespace MajTataru
 
         public event Action<string> OnMessage;
 
-        private const uint MAHJONG_ZONE_ID = 0x33F;
-
         /*
          * FFXIV IPC 包在 NetworkReceived 的 byte[] 中的布局：
          *   Offset  0-3:  PacketSize    (uint32 LE)
@@ -126,21 +124,6 @@ namespace MajTataru
          *
          * Payload 中每个字段为 uint32 LE，依次对应文档中的 F0, F1, F2, ...
          */
-        private const int HEADER_SIZE = 32;
-        private const int OPCODE_OFFSET = 18;
-
-        // Opcodes — 随版本变化，公开以便外部修改
-        public ushort OP_GAME_INIT = 0x00D7;
-        public ushort OP_ROUND_START = 0x0134;
-        public ushort OP_DISCARD = 0x0141;
-        public ushort OP_DRAW_EVENT = 0x01DC;
-        public ushort OP_TSUMO_RESULT = 0x02DE;
-        public ushort OP_RON_RESULT = 0x007E;
-        public ushort OP_ROUND_END = 0x00EF;
-        public ushort OP_SETTLEMENT = 0x00E0;
-        public ushort OP_GAME_RESULT = 0x03DD;
-        public ushort OP_BOARD_HEARTBEAT = 0x0096;
-        public ushort OP_TIMER_HEARTBEAT = 0x02D8;
 
         private static readonly Dictionary<uint, string> DiscardActions = new Dictionary<uint, string>
         {
@@ -178,10 +161,10 @@ namespace MajTataru
         /// </summary>
         public ParseResult ParseBinaryPacket(byte[] message)
         {
-            if (message == null || message.Length < HEADER_SIZE)
+            if (message == null || message.Length < MahjongOpcodes.HEADER_SIZE)
                 return null;
 
-            ushort opcode = BitConverter.ToUInt16(message, OPCODE_OFFSET);
+            ushort opcode = BitConverter.ToUInt16(message, MahjongOpcodes.OPCODE_OFFSET);
 
             if (!IsMahjongOpcode(opcode))
                 return null;
@@ -189,7 +172,7 @@ namespace MajTataru
             if (!State.InMahjongZone)
                 State.InMahjongZone = true;
 
-            uint[] payload = ExtractBinaryPayload(message, HEADER_SIZE);
+            uint[] payload = ExtractBinaryPayload(message, MahjongOpcodes.HEADER_SIZE);
             return DispatchOpcode(opcode, payload);
         }
 
@@ -262,7 +245,7 @@ namespace MajTataru
             uint zoneId;
             if (!TryParseHex(parts[2], out zoneId)) return null;
 
-            if (zoneId == MAHJONG_ZONE_ID)
+            if (zoneId == MahjongOpcodes.MAHJONG_ZONE_ID)
             {
                 State.InMahjongZone = true;
                 string zoneName = parts.Length > 3 ? parts[3] : "曼德维尔魔导方城";
@@ -334,24 +317,24 @@ namespace MajTataru
 
         private bool IsMahjongOpcode(ushort opcode)
         {
-            return opcode == OP_GAME_INIT || opcode == OP_ROUND_START ||
-                   opcode == OP_DISCARD || opcode == OP_DRAW_EVENT ||
-                   opcode == OP_TSUMO_RESULT || opcode == OP_RON_RESULT ||
-                   opcode == OP_ROUND_END || opcode == OP_SETTLEMENT ||
-                   opcode == OP_GAME_RESULT;
+            return opcode == MahjongOpcodes.OP_GAME_INIT || opcode == MahjongOpcodes.OP_ROUND_START ||
+                   opcode == MahjongOpcodes.OP_DISCARD || opcode == MahjongOpcodes.OP_DRAW_EVENT ||
+                   opcode == MahjongOpcodes.OP_TSUMO_RESULT || opcode == MahjongOpcodes.OP_RON_RESULT ||
+                   opcode == MahjongOpcodes.OP_ROUND_END || opcode == MahjongOpcodes.OP_SETTLEMENT ||
+                   opcode == MahjongOpcodes.OP_GAME_RESULT;
         }
 
         private ParseResult DispatchOpcode(ushort opcode, uint[] payload)
         {
-            if (opcode == OP_GAME_INIT) return ParseGameInit(payload);
-            if (opcode == OP_ROUND_START) return ParseRoundStart(payload);
-            if (opcode == OP_DISCARD) return ParseDiscard(payload);
-            if (opcode == OP_DRAW_EVENT) return ParseDrawEvent(payload);
-            if (opcode == OP_TSUMO_RESULT) return ParseTsumoResult(payload);
-            if (opcode == OP_RON_RESULT) return ParseRonResult(payload);
-            if (opcode == OP_ROUND_END) return ParseRoundEnd(payload);
-            if (opcode == OP_SETTLEMENT) return ParseSettlement(payload);
-            if (opcode == OP_GAME_RESULT) return ParseGameResult(payload);
+            if (opcode == MahjongOpcodes.OP_GAME_INIT) return ParseGameInit(payload);
+            if (opcode == MahjongOpcodes.OP_ROUND_START) return ParseRoundStart(payload);
+            if (opcode == MahjongOpcodes.OP_DISCARD) return ParseDiscard(payload);
+            if (opcode == MahjongOpcodes.OP_DRAW_EVENT) return ParseDrawEvent(payload);
+            if (opcode == MahjongOpcodes.OP_TSUMO_RESULT) return ParseTsumoResult(payload);
+            if (opcode == MahjongOpcodes.OP_RON_RESULT) return ParseRonResult(payload);
+            if (opcode == MahjongOpcodes.OP_ROUND_END) return ParseRoundEnd(payload);
+            if (opcode == MahjongOpcodes.OP_SETTLEMENT) return ParseSettlement(payload);
+            if (opcode == MahjongOpcodes.OP_GAME_RESULT) return ParseGameResult(payload);
             return null;
         }
 

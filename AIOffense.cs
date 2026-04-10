@@ -738,6 +738,11 @@ namespace MajTataru
             return advices;
         }
 
+        public CallAdvice CheckRonOnly(MahjongTile discardedTile)
+        {
+            return CheckRon(discardedTile);
+        }
+
         private CallAdvice CheckRon(MahjongTile discardedTile)
         {
             var hand14 = new List<MahjongTile>(_gs.OwnHand) { discardedTile };
