@@ -29,7 +29,11 @@
 * [Gimite's original Mjai protocol](https://gimite.net/pukiwiki/index.php?Mjai%20%E9%BA%BB%E9%9B%80AI%E5%AF%BE%E6%88%A6%E3%82%B5%E3%83%BC%E3%83%90)
 
 [Mortal](https://github.com/Equim-chan/Mortal)是一个基于mjai协议的开源麻将AI，原项目没有提供已经训练好的模型，可以自行训练或在网上寻找其他人训练好的模型
-> Mortal作者没有提供详细的文档, [这里](https://blog.homura.cc/articles/2026/04/12/post_07.html)有我学习Mortal时的一些笔记，仅供参考
+> Mortal作者没有提供详细的文档, [这里](https://blog.homura.cc/articles/2026/04/12/post_07.html)有我学习Mortal时的一些笔记，仅供参考。
+
+> 如果你使用的是由Mortal训练出来的模型，那么在`MortalServer`目录下实现了一个外部AI Server的样例,直接将训练好的mortal.pth放入`MortalServer`目录下，然后在该目录下执行`python server.py`即可
+
+>如果是其他的mjai模型，那么可以参考下面的接口说明实现AI Server。
 
 <details>
 
