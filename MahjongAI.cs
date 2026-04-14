@@ -231,6 +231,7 @@ namespace MajTataru
         private AIDefense _defense;
         private AIOffense _offense;
         private MjaiClient _mjaiClient;
+        private uint[] _pendingRoundStart;
 
         public bool UseMjaiModel { get; set; }
         public string MjaiServerUrl
@@ -282,13 +283,15 @@ namespace MajTataru
             if (opcode == MahjongOpcodes.OP_DISCARD) return OnDiscard(p);
             if (opcode == MahjongOpcodes.OP_DRAW_EVENT) return OnDrawEvent(p);
             if (opcode == MahjongOpcodes.OP_ROUND_END) { if (UseMjaiModel) _mjaiClient.OnRoundEnd(); State.ResetForRound(); return null; }
-            if (opcode == MahjongOpcodes.OP_GAME_RESULT) { if (UseMjaiModel) _mjaiClient.OnGameEnd(); State.InGame = false; State.Reset(); return null; }
+            if (opcode == MahjongOpcodes.OP_GAME_RESULT) { if (UseMjaiModel) _mjaiClient.OnGameEnd(); _pendingRoundStart = null; State.InGame = false; State.Reset(); return null; }
             return null;
         }
 
         private string OnGameInit(uint[] p)
         {
             if (p.Length < 12) return null;
+            var savedRound = _pendingRoundStart;
+            _pendingRoundStart = null;
             State.Reset();
             _mjaiClient.Reset();
             State.GameType = (int)p[0];
@@ -297,12 +300,19 @@ namespace MajTataru
             State.InGame = true;
             for (int i = 0; i < 4; i++) State.Scores[i] = (int)p[7 + i] * 100;
             if (UseMjaiModel) _mjaiClient.OnGameInit();
+            if (savedRound != null)
+                OnRoundStart(savedRound);
             return null;
         }
 
         private string OnRoundStart(uint[] p)
         {
             if (p.Length < 26) return null;
+            if (!State.InGame)
+            {
+                _pendingRoundStart = (uint[])p.Clone();
+                return null;
+            }
             State.ResetForRound();
             State.MySeat = (int)p[6];
             State.SeatWind = State.MySeat + 1;
