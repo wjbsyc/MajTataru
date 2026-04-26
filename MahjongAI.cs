@@ -233,6 +233,14 @@ namespace MajTataru
         private MjaiClient _mjaiClient;
         private uint[] _pendingRoundStart;
 
+        /// <summary>
+        /// 串行化所有数据包处理。NetworkReceived 在线程池上可能并发投递，
+        /// 必须保证 State / _mjaiClient._events / _pendingRoundStart 等共享状态
+        /// 在同一时间只被一个 handler 修改，否则会出现 start_kyoku 被并发 OnDraw
+        /// 抢入或被 _mjaiClient.Reset() 误清等竞态。
+        /// </summary>
+        private readonly object _stateLock = new object();
+
         public bool UseMjaiModel { get; set; }
         public string MjaiServerUrl
         {
@@ -278,13 +286,16 @@ namespace MajTataru
 
         private string Dispatch(ushort opcode, uint[] p)
         {
-            if (opcode == MahjongOpcodes.OP_GAME_INIT) return OnGameInit(p);
-            if (opcode == MahjongOpcodes.OP_ROUND_START) return OnRoundStart(p);
-            if (opcode == MahjongOpcodes.OP_DISCARD) return OnDiscard(p);
-            if (opcode == MahjongOpcodes.OP_DRAW_EVENT) return OnDrawEvent(p);
-            if (opcode == MahjongOpcodes.OP_ROUND_END) { if (UseMjaiModel) _mjaiClient.OnRoundEnd(); State.ResetForRound(); return null; }
-            if (opcode == MahjongOpcodes.OP_GAME_RESULT) { if (UseMjaiModel) _mjaiClient.OnGameEnd(); _pendingRoundStart = null; State.InGame = false; State.Reset(); return null; }
-            return null;
+            lock (_stateLock)
+            {
+                if (opcode == MahjongOpcodes.OP_GAME_INIT) return OnGameInit(p);
+                if (opcode == MahjongOpcodes.OP_ROUND_START) return OnRoundStart(p);
+                if (opcode == MahjongOpcodes.OP_DISCARD) return OnDiscard(p);
+                if (opcode == MahjongOpcodes.OP_DRAW_EVENT) return OnDrawEvent(p);
+                if (opcode == MahjongOpcodes.OP_ROUND_END) { if (UseMjaiModel) _mjaiClient.OnRoundEnd(); State.ResetForRound(); return null; }
+                if (opcode == MahjongOpcodes.OP_GAME_RESULT) { if (UseMjaiModel) _mjaiClient.OnGameEnd(); _pendingRoundStart = null; State.InGame = false; State.Reset(); return null; }
+                return null;
+            }
         }
 
         private string OnGameInit(uint[] p)
