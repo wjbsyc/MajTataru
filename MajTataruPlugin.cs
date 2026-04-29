@@ -11,7 +11,7 @@ using Advanced_Combat_Tracker;
 
 [assembly: AssemblyTitle("MajTataru")]
 [assembly: AssemblyDescription("塔塔露麻将")]
-[assembly: AssemblyVersion("0.1.0.0")]
+[assembly: AssemblyVersion("0.1.1.0")]
 
 namespace MajTataru
 {
